@@ -1,0 +1,507 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "deploymentNumber": {
+            "type": "int",
+            "metadata": {
+                "description": "Enables deploying many groupings of application servers and database servers, each grouping identified using an incrementing number,"
+            }
+        },
+        "availabilityZone": {
+            "type": "int",
+            "metadata": {
+                "description": "Availability zone where this deployment grouping is deployed to"
+            }
+        },
+        "appServerCount": {
+            "defaultValue": "8",
+            "type": "int",
+            "metadata": {
+                "description": "Number of application servers to deploy"
+            }
+        },
+        "appServerPrefix": {
+            "defaultValue": "vmapp",
+            "type": "string",
+            "metadata": {
+                "description": "Name prefix of application server"
+            }
+        },
+        "appServerSubnetId": {
+            "type": "string",
+            "metadata": {
+                "description": "Existing virtual network subnet where the application servers are to be deployed"
+            }
+        },
+        "sqlServerNamePrefix": {
+            "defaultValue": "vmdb",
+            "type": "string",
+            "metadata": {
+                "description": "Name prefix for SQL Server virtual machines"
+            }
+        },
+        "sqlServerSubnetId": {
+            "type": "string",
+            "metadata": {
+                "description": "Existing virtual network subnet where the SQL Server virtual machines are to be deployed"
+            }
+        },
+        "sqlDataDisksCount": {
+            "type": "int",
+            "defaultValue": 1,
+            "minValue": 1,
+            "maxValue": 8,
+            "metadata": {
+                "description": "Amount of data disks (1TB each) for SQL Data files"
+            }
+        },
+        "dataPath": {
+            "type": "String",
+            "defaultValue": "F:\\SQLData",
+            "metadata": {
+                "description": "Path for SQL Data files. Please choose drive letter from F to Z, and other drives from A to E are reserved for system"
+            }
+        },
+        "sqlStorageWorkloadType": {
+            "type": "String",
+            "defaultValue": "General",
+            "allowedValues": [
+                "General",
+                "OLTP",
+                "DW"
+            ],
+            "metadata": {
+                "description": "SQL Server Workload Type"
+            }
+        },
+        "sqlLogDisksCount": {
+            "type": "int",
+            "defaultValue": 1,
+            "minValue": 1,
+            "maxValue": 8,
+            "metadata": {
+                "description": "Amount of data disks (1TB each) for SQL Log files"
+            }
+        },
+        "logPath": {
+            "type": "String",
+            "defaultValue": "G:\\SQLLog",
+            "metadata": {
+                "description": "Path for SQL Log files. Please choose drive letter from F to Z and different than the one used for SQL data. Drive letter from A to E are reserved for system"
+            }
+        },
+        "adminUserName": {
+            "type": "string",
+            "defaultValue": "myadmin"
+        },
+        "adminPassword": {
+            "type": "securestring"
+        }
+    },
+    "variables": {
+        "ppgName": "[concat('ppg-group',parameters('deploymentNumber'))]",
+        "appServerNicPrefix": "[concat('nic-',parameters('appServerPrefix'),'-',format('{0:D3}',parameters('deploymentNumber')),'-')]",
+        "appServerNamePrefix": "[concat(parameters('appServerPrefix'),format('{0:D3}',parameters('deploymentNumber')))]",
+        "appServerAvailabilitySetName": "[concat('avail-appserver-',format('{0:D3}',parameters('deploymentNumber')))]",
+
+        "dbServerNicPrefix": "[concat('nic-',parameters('sqlServerNamePrefix'),'-',format('{0:D3}',parameters('deploymentNumber')),'-')]",
+        "dbServerNamePrefix": "[concat(parameters('sqlServerNamePrefix'),format('{0:D3}',parameters('deploymentNumber')))]",
+        "dbServerAvailabilitySetName": "[concat('avail-db-',format('{0:D3}',parameters('deploymentNumber')))]",
+        "diskConfigurationType": "NEW",
+        "dataDisksLuns": "[array(range(0 ,parameters('sqlDataDisksCount')))]",
+        "logDisksLuns": "[array(range(parameters('sqlDataDisksCount'), parameters('sqlLogDisksCount')))]",
+        "dataDisks": {
+            "createOption": "empty",
+            "caching": "ReadOnly",
+            "writeAcceleratorEnabled": false,
+            "storageAccountType": "Premium_LRS",
+            "diskSizeGB": 1023
+        },
+        "tempDbPath": "D:\\SQLTemp",
+        "location": "[resourceGroup().location]"
+    },
+    "resources": [
+        {
+            "type": "Microsoft.Compute/proximityPlacementGroups",
+            "apiVersion": "2019-07-01",
+            "name": "[variables('ppgName')]",
+            "location": "[variables('location')]",
+            "properties": {
+                "proximityPlacementGroupType": "Standard"
+            },
+            "tags": {
+                "deployment": "[format('{0:D3}',parameters('deploymentNumber'))]",
+                "displayName": "proximityPlacementGroup"
+            }
+        },
+        {
+            "type": "Microsoft.Network/networkInterfaces",
+            "apiVersion": "2020-06-01",
+            "location": "[variables('location')]",
+            "copy": {
+                "name": "niccopy",
+                "count": "[parameters('appServerCount')]"
+            },
+            "name": "[concat(variables('appServerNicPrefix'),format('{0:D3}',copyIndex()))]",
+            "properties": {
+                "ipConfigurations": [
+                    {
+                        "name": "ipconfig1",
+                        "properties": {
+                            "privateIPAllocationMethod": "Dynamic",
+                            "subnet": {
+                                "id": "[parameters('appServerSubnetId')]"
+                            },
+                            "primary": true,
+                            "privateIPAddressVersion": "IPv4"
+                        }
+                    }
+                ],
+                "dnsSettings": {
+                    "dnsServers": []
+                },
+                "enableAcceleratedNetworking": false,
+                "enableIPForwarding": false
+            },
+            "tags": {
+                "deployment": "[format('{0:D3}',parameters('deploymentNumber'))]",
+                "displayName": "Application Server Network Interfaces"
+            }
+        },
+        {
+            "type": "Microsoft.Compute/virtualMachines",
+            "apiVersion": "2019-07-01",
+            "name": "[concat(variables('appServerNamePrefix'),format('{0:D3}',0))]",
+            "location": "[variables('location')]",
+            "zones": [
+                "[parameters('availabilityZone')]"
+            ],
+            "dependsOn": [
+                "[resourceId('Microsoft.Compute/proximityPlacementGroups', variables('ppgName'))]",
+                "[resourceId('Microsoft.Network/networkInterfaces', concat(variables('appServerNicPrefix'),format('{0:D3}',0)))]"
+            ],
+            "properties": {
+                "proximityPlacementGroup": {
+                    "id": "[resourceId('Microsoft.Compute/proximityPlacementGroups', variables('ppgName'))]"
+                },
+                "hardwareProfile": {
+                    "vmSize": "Standard_B2s"
+                },
+                "storageProfile": {
+                    "imageReference": {
+                        "publisher": "MicrosoftWindowsServer",
+                        "offer": "WindowsServer",
+                        "sku": "2016-Datacenter",
+                        "version": "latest"
+                    },
+                    "osDisk": {
+                        "osType": "Windows",
+                        "name": "[concat(variables('appServerNamePrefix'),format('{0:D3}',0), '_OsDisk_1')]",
+                        "createOption": "FromImage",
+                        "caching": "ReadWrite",
+                        "managedDisk": {
+                            "storageAccountType": "Premium_LRS"
+                        },
+                        "diskSizeGB": 127
+                    },
+                    "dataDisks": []
+                },
+                "osProfile": {
+                    "computerName": "[concat(variables('appServerNamePrefix'),format('{0:D3}',0))]",
+                    "adminUsername": "[parameters('adminUserName')]",
+                    "adminPassword": "[parameters('adminPassword')]",
+                    "windowsConfiguration": {
+                        "provisionVMAgent": true,
+                        "enableAutomaticUpdates": true
+                    },
+                    "secrets": [],
+                    "allowExtensionOperations": true
+
+                },
+                "networkProfile": {
+                    "networkInterfaces": [
+                        {
+                            "id": "[resourceId('Microsoft.Network/networkInterfaces', concat(variables('appServerNicPrefix'),format('{0:D3}',0)))]"
+                        }
+                    ]
+                },
+                "diagnosticsProfile": {
+                    "bootDiagnostics": {
+                        "enabled": false
+                    }
+                }
+            },
+            "tags": {
+                "deployment": "[format('{0:D3}',parameters('deploymentNumber'))]",
+                "displayName": "Anchor Application Server virtual machine"
+            }
+        },
+        {
+            "type": "Microsoft.Compute/availabilitySets",
+            "apiVersion": "2020-06-01",
+            "name": "[variables('appServerAvailabilitySetName')]",
+            "location": "[variables('location')]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Compute/virtualMachines', concat(variables('appServerNamePrefix'),format('{0:D3}',0)))]"
+            ],
+            "sku": {
+                "name": "Aligned"
+            },
+            "properties": {
+                "platformUpdateDomainCount": "5",
+                "platformFaultDomainCount": "3",
+                "proximityPlacementGroup": {
+                    "id": "[resourceId('Microsoft.Compute/proximityPlacementGroups', variables('ppgName'))]"
+                }
+            },
+            "tags": {
+                "deployment": "[format('{0:D3}',parameters('deploymentNumber'))]",
+                "displayName": "Application Server availability set"
+            }
+        },
+        {
+            "type": "Microsoft.Compute/virtualMachines",
+            "apiVersion": "2019-07-01",
+            "name": "[concat(variables('appServerNamePrefix'),format('{0:D3}',copyIndex(1)))]",
+            "location": "[variables('location')]",
+            "copy": {
+                "name": "vmcopy",
+                "count": "[sub(parameters('appServerCount'),1)]"
+            },
+            "dependsOn": [
+                "[resourceId('Microsoft.Compute/availabilitySets',variables('appServerAvailabilitySetName'))]",
+                "[resourceId('Microsoft.Network/networkInterfaces', concat(variables('appServerNicPrefix'),format('{0:D3}',copyIndex(1))))]"
+            ],
+            "properties": {
+                "availabilitySet": {
+                    "id": "[resourceId('Microsoft.Compute/availabilitySets',variables('appServerAvailabilitySetName'))]"
+                },
+                "hardwareProfile": {
+                    "vmSize": "Standard_B2s"
+                },
+                "storageProfile": {
+                    "imageReference": {
+                        "publisher": "MicrosoftWindowsServer",
+                        "offer": "WindowsServer",
+                        "sku": "2016-Datacenter",
+                        "version": "latest"
+                    },
+                    "osDisk": {
+                        "osType": "Windows",
+                        "name": "[concat(variables('appServerNamePrefix'),format('{0:D3}',copyIndex(1)), '_OsDisk_1')]",
+                        "createOption": "FromImage",
+                        "caching": "ReadWrite",
+                        "managedDisk": {
+                            "storageAccountType": "Premium_LRS"
+                        },
+                        "diskSizeGB": 127
+                    },
+                    "dataDisks": []
+                },
+                "osProfile": {
+                    "computerName": "[concat(variables('appServerNamePrefix'),format('{0:D3}',copyIndex(1)))]",
+                    "adminUsername": "[parameters('adminUserName')]",
+                    "adminPassword": "[parameters('adminPassword')]",
+                    "windowsConfiguration": {
+                        "provisionVMAgent": true,
+                        "enableAutomaticUpdates": true
+                    },
+                    "secrets": [],
+                    "allowExtensionOperations": true
+
+                },
+                "networkProfile": {
+                    "networkInterfaces": [
+                        {
+                            "id": "[resourceId('Microsoft.Network/networkInterfaces', concat(variables('appServerNicPrefix'),format('{0:D3}',copyIndex(1))))]"
+                        }
+                    ]
+                },
+                "diagnosticsProfile": {
+                    "bootDiagnostics": {
+                        "enabled": false
+                    }
+                }
+            },
+            "tags": {
+                "deployment": "[format('{0:D3}',parameters('deploymentNumber'))]",
+                "displayName": "Application Servers"
+            }
+        },
+        {
+            "type": "Microsoft.Compute/availabilitySets",
+            "apiVersion": "2020-06-01",
+            "name": "[variables('dbServerAvailabilitySetName')]",
+            "location": "[variables('location')]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Compute/virtualMachines', concat(variables('appServerNamePrefix'),format('{0:D3}',0)))]"
+            ],
+            "sku": {
+                "name": "Aligned"
+            },
+            "properties": {
+                "platformUpdateDomainCount": "5",
+                "platformFaultDomainCount": "3",
+                "proximityPlacementGroup": {
+                    "id": "[resourceId('Microsoft.Compute/proximityPlacementGroups', variables('ppgName'))]"
+                }
+            },
+            "tags": {
+                "deployment": "[format('{0:D3}',parameters('deploymentNumber'))]",
+                "displayName": "Database Server availability set"
+            }
+        },
+        {
+            "type": "Microsoft.Network/networkInterfaces",
+            "apiVersion": "2020-06-01",
+            "location": "[variables('location')]",
+            "copy": {
+                "name": "dbniccopy",
+                "count": 2
+            },
+            "name": "[concat(variables('dbServerNicPrefix'),format('{0:D3}',copyIndex()))]",
+            "properties": {
+                "ipConfigurations": [
+                    {
+                        "name": "ipconfig1",
+                        "properties": {
+                            "privateIPAllocationMethod": "Dynamic",
+                            "subnet": {
+                                "id": "[parameters('sqlServerSubnetId')]"
+                            },
+                            "primary": true,
+                            "privateIPAddressVersion": "IPv4"
+                        }
+                    }
+                ],
+                "dnsSettings": {
+                    "dnsServers": []
+                },
+                "enableAcceleratedNetworking": true,
+                "enableIPForwarding": false
+            },
+            "tags": {
+                "deployment": "[format('{0:D3}',parameters('deploymentNumber'))]",
+                "displayName": "Database Server network interfaces"
+            }
+        },
+        {
+            "type": "Microsoft.Compute/virtualMachines",
+            "apiVersion": "2019-07-01",
+            "name": "[concat(variables('dbServerNamePrefix'),format('{0:D3}',copyIndex()))]",
+            "location": "[variables('location')]",
+            "copy": {
+                "name": "dbvmcopy",
+                "count": 2
+            },
+            "dependsOn": [
+                "[resourceId('Microsoft.Compute/availabilitySets',variables('dbServerAvailabilitySetName'))]",
+                "[resourceId('Microsoft.Network/networkInterfaces', concat(variables('dbServerNicPrefix'),format('{0:D3}',copyIndex())))]"
+            ],
+            "properties": {
+                "availabilitySet": {
+                    "id": "[resourceId('Microsoft.Compute/availabilitySets',variables('dbServerAvailabilitySetName'))]"
+                },
+                "hardwareProfile": {
+                    "vmSize": "Standard_DS3_v2"
+                },
+                "storageProfile": {
+                    "imageReference": {
+                        "publisher": "microsoftsqlserver",
+                        "offer": "sql2019-ws2019",
+                        "sku": "standard",
+                        "version": "latest"
+                    },
+                    "osDisk": {
+                        "osType": "Windows",
+                        "name": "[concat(variables('dbServerNamePrefix'),format('{0:D3}',copyIndex()), '_OsDisk_1')]",
+                        "createOption": "FromImage",
+                        "caching": "ReadWrite",
+                        "managedDisk": {
+                            "storageAccountType": "Premium_LRS"
+                        },
+                        "diskSizeGB": 127
+                    },
+                    "copy": [
+                        {
+                            "name": "dataDisks",
+                            "count": "[add(parameters('sqlDataDisksCount'), parameters('sqlLogDisksCount'))]",
+                            "input": {
+                                "lun": "[copyIndex('dataDisks')]",
+                                "createOption": "[variables('dataDisks').createOption]",
+                                "caching": "[if(greaterOrEquals(copyIndex('dataDisks'), parameters('sqlDataDisksCount')) ,'None', variables('dataDisks').caching )]",
+                                "writeAcceleratorEnabled": "[variables('dataDisks').writeAcceleratorEnabled]",
+                                "diskSizeGB": "[variables('dataDisks').diskSizeGB]",
+                                "managedDisk": {
+                                    "storageAccountType": "[variables('dataDisks').storageAccountType]"
+                                }
+                            }
+                        }
+                    ]
+                },
+                "osProfile": {
+                    "computerName": "[concat(variables('dbServerNamePrefix'),format('{0:D3}',copyIndex()))]",
+                    "adminUsername": "[parameters('adminUserName')]",
+                    "adminPassword": "[parameters('adminPassword')]",
+                    "windowsConfiguration": {
+                        "provisionVMAgent": true,
+                        "enableAutomaticUpdates": true
+                    },
+                    "secrets": [],
+                    "allowExtensionOperations": true
+
+                },
+                "networkProfile": {
+                    "networkInterfaces": [
+                        {
+                            "id": "[resourceId('Microsoft.Network/networkInterfaces', concat(variables('dbServerNicPrefix'),format('{0:D3}',copyIndex())))]"
+                        }
+                    ]
+                },
+                "diagnosticsProfile": {
+                    "bootDiagnostics": {
+                        "enabled": false
+                    }
+                }
+            },
+            "tags": {
+                "deployment": "[format('{0:D3}',parameters('deploymentNumber'))]",
+                "displayName": "Database Server virtual machines"
+            }
+        },
+        {
+            "type": "Microsoft.SqlVirtualMachine/SqlVirtualMachines",
+            "apiVersion": "2017-03-01-preview",
+            "name": "[concat(variables('dbServerNamePrefix'),format('{0:D3}',copyIndex()))]",
+            "location": "[variables('location')]",
+            "copy": {
+                "name": "sqlcopy",
+                "count": 2
+            },
+            "dependsOn": [
+                "[resourceId('Microsoft.Compute/virtualMachines',concat(variables('dbServerNamePrefix'),format('{0:D3}',copyIndex())))]"
+            ],
+            "properties": {
+                "virtualMachineResourceId": "[resourceId('Microsoft.Compute/virtualMachines',concat(variables('dbServerNamePrefix'),format('{0:D3}',copyIndex())))]",
+                "sqlManagement": "Full",
+                "SqlServerLicenseType": "PAYG",
+                "StorageConfigurationSettings": {
+                    "DiskConfigurationType": "[variables('diskConfigurationType')]",
+                    "StorageWorkloadType": "[parameters('sqlStorageWorkloadType')]",
+                    "SQLDataSettings": {
+                        "LUNs": "[variables('dataDisksLUNs')]",
+                        "DefaultFilePath": "[parameters('dataPath')]"
+                    },
+                    "SQLLogSettings": {
+                        "Luns": "[variables('logDisksLUNs')]",
+                        "DefaultFilePath": "[parameters('logPath')]"
+                    },
+                    "SQLTempDbSettings": {
+                        "DefaultFilePath": "[variables('tempDbPath')]"
+                    }
+                }
+            }
+        }
+    ]
+}

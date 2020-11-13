@@ -1,0 +1,32 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+      "deploymentNumber": {
+        "value": 1
+      },
+      "availabilityZone":{
+        "value":1
+      },
+      "appServerCount": {
+        "value": 8
+      },
+      "appServerPrefix": {
+        "value": "vmapp"
+      },
+      "appServerSubnetId": {
+        "value": "/subscriptions/04ece713-fe40-42a8-a280-8c55953f1133/resourceGroups/rg-networking-eastus-001/providers/Microsoft.Network/virtualNetworks/vnet-workloads-eastus-001/subnets/ApplicationSubnet"
+      },
+      "sqlServerSubnetId":{
+        "value": "/subscriptions/04ece713-fe40-42a8-a280-8c55953f1133/resourceGroups/rg-networking-eastus-001/providers/Microsoft.Network/virtualNetworks/vnet-workloads-eastus-001/subnets/DataSubnet"
+      },
+      "adminPassword": {
+        "reference": {
+            "keyVault": {
+            "id": "/subscriptions/04ece713-fe40-42a8-a280-8c55953f1133/resourceGroups/rg-ppg-002/providers/Microsoft.KeyVault/vaults/kv-ppg-001"
+            },
+            "secretName": "vmAdminPassword"
+        }
+      }
+    }
+  }
