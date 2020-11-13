@@ -16,6 +16,19 @@ Deployment can be done using the Azure CLI:
 ````bash
 az deployment group create --name ppg1 --template-file azuredeploy.json --parameters @azuredeploy.parameters.json --resource-group rg-ppg-002
 ````
+If you want to deploy many individual proximity placement groups containing their own availability sets, use the deploymentNumber parameter with a unique deployment name for each deployment. This will ensure unique naming of the resources and will appropriately tag each resource.
+
+````bash
+az deployment group create --name ppg1  --template-file azuredeploy.json --parameters @azuredeploy.parameters.json --resource-group rg-ppg-002 --parameters deploymentNumber=1 --no-wait
+
+az deployment group create --name ppg2  --template-file azuredeploy.json --parameters @azuredeploy.parameters.json --resource-group rg-ppg-002 --parameters deploymentNumber=2 --no-wait
+
+az deployment group create --name ppg3  --template-file azuredeploy.json --parameters @azuredeploy.parameters.json --resource-group rg-ppg-002 --parameters deploymentNumber=3 --no-wait
+
+az deployment group create --name ppg4  --template-file azuredeploy.json --parameters @azuredeploy.parameters.json --resource-group rg-ppg-002 --parameters deploymentNumber=4 --no-wait
+
+````
+![Use tags to navigate to a single deployment number](images/tagging.png)
 
 ## Result
 The result of the deployment is a proximity group containing the virtual machines and the availability sets.
